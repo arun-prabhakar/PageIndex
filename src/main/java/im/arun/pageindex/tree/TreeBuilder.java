@@ -15,7 +15,11 @@ import im.arun.pageindex.util.TreeUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import im.arun.pageindex.util.ExecutorProvider;
+
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
 
 /**
  * Builds hierarchical tree structure from TOC and document pages.
@@ -386,52 +390,78 @@ public class TreeBuilder {
      * Python equivalent: process_none_page_numbers() lines 648-683
      */
     private List<TocItem> processNonePageNumbers(List<TocItem> tocItems, List<PdfPage> pageList, String model) {
+        // Collect indices of items that need fixing
+        List<Integer> nullIndices = new ArrayList<>();
         for (int i = 0; i < tocItems.size(); i++) {
-            TocItem item = tocItems.get(i);
-            
-            if (item.getStartIndex() == null) {
-                // Find previous and next physical indices
-                Integer prevPhysicalIndex = 0;
-                for (int j = i - 1; j >= 0; j--) {
-                    if (tocItems.get(j).getStartIndex() != null) {
-                        prevPhysicalIndex = tocItems.get(j).getStartIndex();
-                        break;
-                    }
-                }
-                
-                Integer nextPhysicalIndex = pageList.size();
-                for (int j = i + 1; j < tocItems.size(); j++) {
-                    if (tocItems.get(j).getStartIndex() != null) {
-                        nextPhysicalIndex = tocItems.get(j).getStartIndex();
-                        break;
-                    }
-                }
-                
-                // Build content between prev and next
-                StringBuilder content = new StringBuilder();
-                for (int pageIndex = prevPhysicalIndex; pageIndex <= nextPhysicalIndex && pageIndex < pageList.size(); pageIndex++) {
-                    if (pageIndex >= 0 && pageIndex < pageList.size()) {
-                        content.append(String.format("<physical_index_%d>\n%s\n</physical_index_%d>\n\n",
-                            pageIndex, pageList.get(pageIndex).getText(), pageIndex));
-                    }
-                }
-                
-                // Use LLM to find physical index
-                String prompt = promptBuilder.buildTocItemFixerPrompt(item.getTitle(), content.toString());
-                String response = openAIClient.chat(model, prompt);
-                JsonNode jsonResponse = jsonParser.extractJson(response);
-                
-                if (jsonResponse.has("physical_index")) {
-                    String physicalIndex = jsonResponse.get("physical_index").asText();
-                    Integer physicalIndexInt = TreeUtils.parsePhysicalIndex(physicalIndex);
-                    if (physicalIndexInt != null) {
-                        item.setStartIndex(physicalIndexInt);
-                        item.setPhysicalIndex(String.format("physical_index_%d", physicalIndexInt));
-                    }
-                }
+            if (tocItems.get(i).getStartIndex() == null) {
+                nullIndices.add(i);
             }
         }
-        
+
+        if (nullIndices.isEmpty()) {
+            return tocItems;
+        }
+
+        // Pre-build content ranges for each null item
+        List<String> contentRanges = new ArrayList<>();
+        for (int idx : nullIndices) {
+            Integer prevPhysicalIndex = 0;
+            for (int j = idx - 1; j >= 0; j--) {
+                if (tocItems.get(j).getStartIndex() != null) {
+                    prevPhysicalIndex = tocItems.get(j).getStartIndex();
+                    break;
+                }
+            }
+
+            Integer nextPhysicalIndex = pageList.size();
+            for (int j = idx + 1; j < tocItems.size(); j++) {
+                if (tocItems.get(j).getStartIndex() != null) {
+                    nextPhysicalIndex = tocItems.get(j).getStartIndex();
+                    break;
+                }
+            }
+
+            StringBuilder content = new StringBuilder();
+            for (int pageIndex = prevPhysicalIndex; pageIndex <= nextPhysicalIndex && pageIndex < pageList.size(); pageIndex++) {
+                if (pageIndex >= 0 && pageIndex < pageList.size()) {
+                    content.append(String.format("<physical_index_%d>\n%s\n</physical_index_%d>\n\n",
+                        pageIndex, pageList.get(pageIndex).getText(), pageIndex));
+                }
+            }
+            contentRanges.add(content.toString());
+        }
+
+        // Process all null items concurrently
+        ExecutorService executor = ExecutorProvider.getExecutor();
+        List<CompletableFuture<Integer>> futures = new ArrayList<>();
+        for (int k = 0; k < nullIndices.size(); k++) {
+            int idx = nullIndices.get(k);
+            String contentRange = contentRanges.get(k);
+            String title = tocItems.get(idx).getTitle();
+
+            futures.add(CompletableFuture.supplyAsync(() -> {
+                String prompt = promptBuilder.buildTocItemFixerPrompt(title, contentRange);
+                String response = openAIClient.chat(model, prompt);
+                JsonNode jsonResponse = jsonParser.extractJson(response);
+                if (jsonResponse.has("physical_index")) {
+                    return TreeUtils.parsePhysicalIndex(jsonResponse.get("physical_index").asText());
+                }
+                return null;
+            }, executor));
+        }
+
+        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+
+        // Apply results
+        for (int k = 0; k < nullIndices.size(); k++) {
+            Integer physicalIndexInt = futures.get(k).join();
+            if (physicalIndexInt != null) {
+                int idx = nullIndices.get(k);
+                tocItems.get(idx).setStartIndex(physicalIndexInt);
+                tocItems.get(idx).setPhysicalIndex(String.format("physical_index_%d", physicalIndexInt));
+            }
+        }
+
         return tocItems;
     }
 

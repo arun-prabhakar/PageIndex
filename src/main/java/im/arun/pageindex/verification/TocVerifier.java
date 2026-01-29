@@ -10,8 +10,11 @@ import im.arun.pageindex.util.JsonLogger;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import im.arun.pageindex.util.ExecutorProvider;
+
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
 import java.util.stream.Collectors;
 
 /**
@@ -106,8 +109,8 @@ public class TocVerifier {
         
         // Run checks concurrently using CompletableFuture
         List<CompletableFuture<Map<String, Object>>> futures = indexedSampleList.stream()
-            .map(item -> CompletableFuture.supplyAsync(() -> 
-                checkTitleAppearance(item, pageList, startIndex, model)))
+            .map(item -> CompletableFuture.supplyAsync(() ->
+                checkTitleAppearance(item, pageList, startIndex, model), ExecutorProvider.getExecutor()))
             .collect(Collectors.toList());
         
         // Wait for all futures to complete
@@ -214,6 +217,7 @@ public class TocVerifier {
             .filter(item -> item.getStartIndex() != null)
             .collect(Collectors.toList());
         
+        ExecutorService executor = ExecutorProvider.getExecutor();
         List<CompletableFuture<String>> futures = validItems.stream()
             .map(item -> CompletableFuture.supplyAsync(() -> {
                 int pageIndex = item.getStartIndex() - 1;
@@ -222,7 +226,7 @@ public class TocVerifier {
                     return checkTitleAppearanceInStart(item.getTitle(), pageText, model);
                 }
                 return "no";
-            }))
+            }, executor))
             .collect(Collectors.toList());
         
         // Wait for all to complete

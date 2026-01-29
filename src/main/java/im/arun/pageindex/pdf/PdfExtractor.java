@@ -71,20 +71,23 @@ public class PdfExtractor {
     }
 
     private List<PdfPage> extractPagesFromDocument(PDDocument document, String model) throws IOException {
-        List<PdfPage> pages = new ArrayList<>();
         int totalPages = document.getNumberOfPages();
+        List<PdfPage> pages = new ArrayList<>(totalPages);
 
         PDFTextStripper stripper = new PDFTextStripper();
 
+        // Extract all text first (PDFBox is not thread-safe per document)
+        String[] texts = new String[totalPages];
         for (int i = 0; i < totalPages; i++) {
-            // PDFBox pages are 1-indexed
             stripper.setStartPage(i + 1);
             stripper.setEndPage(i + 1);
+            texts[i] = stripper.getText(document);
+        }
 
-            String text = stripper.getText(document);
-            int tokenCount = tokenCounter.countTokens(text, model);
-
-            pages.add(new PdfPage(i + 1, text, tokenCount));
+        // Count tokens (CPU-bound, safe to do in tight loop with cached encoding)
+        for (int i = 0; i < totalPages; i++) {
+            int tokenCount = tokenCounter.countTokens(texts[i], model);
+            pages.add(new PdfPage(i + 1, texts[i], tokenCount));
         }
 
         logger.info("Extracted {} pages from PDF", totalPages);

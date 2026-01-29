@@ -10,8 +10,14 @@ import im.arun.pageindex.util.JsonLogger;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import im.arun.pageindex.util.ExecutorProvider;
+
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 /**
  * Detects table of contents pages within a PDF document.
@@ -39,39 +45,66 @@ public class TocDetector {
      * @return List of page indices that contain TOC
      */
     public List<Integer> findTocPages(List<PdfPage> pages, PageIndexConfig config, JsonLogger jsonLogger) {
-        logger.info("Starting TOC page detection");
+        logger.info("Starting TOC page detection (parallel batch)");
+
+        int checkLimit = Math.min(config.getTocCheckPageNum(), pages.size());
+
+        // Parallel batch: check all candidate pages concurrently
+        ExecutorService executor = ExecutorProvider.getExecutor();
+        List<CompletableFuture<Boolean>> futures = IntStream.range(0, checkLimit)
+            .mapToObj(i -> CompletableFuture.supplyAsync(() ->
+                detectTocOnPage(pages.get(i), config.getModel()), executor))
+            .collect(Collectors.toList());
+
+        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+
+        // Collect results in order
+        boolean[] results = new boolean[checkLimit];
+        for (int i = 0; i < checkLimit; i++) {
+            results[i] = futures.get(i).join();
+        }
+
+        // Find contiguous TOC page range
         List<Integer> tocPageList = new ArrayList<>();
-        boolean lastPageWasYes = false;
-        int i = 0;
-        
-        while (i < pages.size()) {
-            // Only check beyond max_pages if we're still finding TOC pages
-            if (i >= config.getTocCheckPageNum() && !lastPageWasYes) {
-                break;
-            }
-            
-            boolean detected = detectTocOnPage(pages.get(i), config.getModel());
-            
-            if (detected) {
+        boolean foundToc = false;
+        for (int i = 0; i < checkLimit; i++) {
+            if (results[i]) {
+                tocPageList.add(i);
+                foundToc = true;
                 if (jsonLogger != null) {
                     jsonLogger.info("Page " + i + " has toc");
                 }
-                tocPageList.add(i);
-                lastPageWasYes = true;
-            } else if (lastPageWasYes) {
+            } else if (foundToc) {
+                // TOC pages ended
                 if (jsonLogger != null) {
                     jsonLogger.info("Found the last page with toc: " + (i - 1));
                 }
                 break;
             }
-            
-            i++;
         }
-        
+
+        // If last checked page was TOC, continue checking beyond the initial limit
+        if (foundToc && !tocPageList.isEmpty() && tocPageList.get(tocPageList.size() - 1) == checkLimit - 1) {
+            for (int i = checkLimit; i < pages.size(); i++) {
+                boolean detected = detectTocOnPage(pages.get(i), config.getModel());
+                if (detected) {
+                    tocPageList.add(i);
+                    if (jsonLogger != null) {
+                        jsonLogger.info("Page " + i + " has toc");
+                    }
+                } else {
+                    if (jsonLogger != null) {
+                        jsonLogger.info("Found the last page with toc: " + (i - 1));
+                    }
+                    break;
+                }
+            }
+        }
+
         if (tocPageList.isEmpty() && jsonLogger != null) {
             jsonLogger.info("No toc found");
         }
-        
+
         return tocPageList;
     }
     

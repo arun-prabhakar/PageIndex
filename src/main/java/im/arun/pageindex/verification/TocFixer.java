@@ -11,8 +11,11 @@ import im.arun.pageindex.util.TreeUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import im.arun.pageindex.util.ExecutorProvider;
+
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
 import java.util.stream.Collectors;
 
 /**
@@ -104,11 +107,12 @@ public class TocFixer {
         
         int endIndex = pageList.size() + startIndex - 1;
         
-        // Process incorrect items concurrently
+        // Process incorrect items concurrently using shared executor
+        ExecutorService executor = ExecutorProvider.getExecutor();
         List<CompletableFuture<Map<String, Object>>> futures = incorrectResults.stream()
-            .map(incorrectItem -> CompletableFuture.supplyAsync(() -> 
-                processAndCheckItem(incorrectItem, tocItems, pageList, incorrectIndices, 
-                                   startIndex, endIndex, model)))
+            .map(incorrectItem -> CompletableFuture.supplyAsync(() ->
+                processAndCheckItem(incorrectItem, tocItems, pageList, incorrectIndices,
+                                   startIndex, endIndex, model), executor))
             .collect(Collectors.toList());
         
         // Wait for all to complete

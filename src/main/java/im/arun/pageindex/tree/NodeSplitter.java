@@ -9,10 +9,13 @@ import im.arun.pageindex.verification.TocVerifier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import im.arun.pageindex.util.ExecutorProvider;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
 import java.util.stream.Collectors;
 
 /**
@@ -113,8 +116,8 @@ public class NodeSplitter {
         // Recursively process children
         if (node.getNodes() != null && !node.getNodes().isEmpty()) {
             List<CompletableFuture<TreeNode>> futures = node.getNodes().stream()
-                .map(childNode -> CompletableFuture.supplyAsync(() -> 
-                    processLargeNodeRecursively(childNode, pageList, config)))
+                .map(childNode -> CompletableFuture.supplyAsync(() ->
+                    processLargeNodeRecursively(childNode, pageList, config), ExecutorProvider.getExecutor()))
                 .collect(Collectors.toList());
             
             // Wait for all to complete

@@ -15,14 +15,20 @@ import org.slf4j.LoggerFactory;
 public class TokenCounter {
     private static final Logger logger = LoggerFactory.getLogger(TokenCounter.class);
     private final EncodingRegistry registry;
+    private volatile Encoding cachedEncoding;
+    private volatile String cachedModel;
 
     public TokenCounter() {
         this.registry = Encodings.newDefaultEncodingRegistry();
+        // Pre-cache the default encoding
+        this.cachedEncoding = registry.getEncoding(EncodingType.CL100K_BASE);
+        this.cachedModel = null;
     }
 
     /**
      * Count tokens in text for a specific model.
-     * 
+     * Caches the encoding instance to avoid repeated lookups.
+     *
      * @param text  The text to count tokens for
      * @param model The model name (e.g., "gpt-4o-2024-11-20")
      * @return Number of tokens
@@ -32,35 +38,27 @@ public class TokenCounter {
             return 0;
         }
 
-        try {
-            // Try to get encoding for the specific model
-            Encoding encoding = getEncodingForModel(model);
-            return encoding.countTokens(text);
-        } catch (Exception e) {
-            logger.warn("Failed to count tokens for model {}: {}", model, e.getMessage());
-            // Fallback to cl100k_base encoding (used by GPT-4 and GPT-3.5-turbo)
-            Encoding encoding = registry.getEncoding(EncodingType.CL100K_BASE);
-            return encoding.countTokens(text);
-        }
+        Encoding encoding = getEncodingCached(model);
+        return encoding.countTokens(text);
     }
 
-    private Encoding getEncodingForModel(String model) {
-        // Map model names to encodings
-        if (model == null) {
-            return registry.getEncoding(EncodingType.CL100K_BASE);
+    private Encoding getEncodingCached(String model) {
+        // Fast path: same model as last call (common case)
+        if (model != null && model.equals(cachedModel) && cachedEncoding != null) {
+            return cachedEncoding;
+        }
+        if (model == null && cachedModel == null && cachedEncoding != null) {
+            return cachedEncoding;
         }
 
-        // GPT-4 and GPT-4o models use cl100k_base
-        if (model.startsWith("gpt-4")) {
-            return registry.getEncoding(EncodingType.CL100K_BASE);
-        }
+        Encoding encoding = resolveEncoding(model);
+        cachedModel = model;
+        cachedEncoding = encoding;
+        return encoding;
+    }
 
-        // GPT-3.5-turbo uses cl100k_base
-        if (model.startsWith("gpt-3.5")) {
-            return registry.getEncoding(EncodingType.CL100K_BASE);
-        }
-
-        // Fallback to cl100k_base
+    private Encoding resolveEncoding(String model) {
+        // All current OpenAI models use cl100k_base
         return registry.getEncoding(EncodingType.CL100K_BASE);
     }
 }

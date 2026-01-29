@@ -21,6 +21,8 @@ public class OpenAIClient {
     private static final Logger logger = LoggerFactory.getLogger(OpenAIClient.class);
     private static final String API_URL = "https://api.openai.com/v1/chat/completions";
     private static final int MAX_RETRIES = 10;
+    private static final long BASE_BACKOFF_MS = 1000;
+    private static final long MAX_BACKOFF_MS = 30000;
     private static final MediaType JSON = MediaType.get("application/json; charset=utf-8");
 
     private final OkHttpClient httpClient;
@@ -34,9 +36,10 @@ public class OpenAIClient {
         }
 
         this.httpClient = new OkHttpClient.Builder()
-                .connectTimeout(60, TimeUnit.SECONDS)
+                .connectTimeout(30, TimeUnit.SECONDS)
                 .readTimeout(120, TimeUnit.SECONDS)
-                .writeTimeout(60, TimeUnit.SECONDS)
+                .writeTimeout(30, TimeUnit.SECONDS)
+                .connectionPool(new ConnectionPool(32, 5, TimeUnit.MINUTES))
                 .build();
 
         this.objectMapper = new ObjectMapper();
@@ -79,7 +82,9 @@ public class OpenAIClient {
                 logger.error("OpenAI API call failed (attempt {}/{}): {}", attempt + 1, MAX_RETRIES, e.getMessage());
                 if (attempt < MAX_RETRIES - 1) {
                     try {
-                        Thread.sleep(1000); // Wait 1 second before retry
+                        long backoff = Math.min(BASE_BACKOFF_MS * (1L << attempt), MAX_BACKOFF_MS);
+                        logger.debug("Retrying in {}ms", backoff);
+                        Thread.sleep(backoff);
                     } catch (InterruptedException ie) {
                         Thread.currentThread().interrupt();
                         throw new RuntimeException("Interrupted during retry wait", ie);

@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.SerializationFeature;
 import im.arun.pageindex.config.PageIndexConfig;
 import im.arun.pageindex.model.TreeStructure;
 import im.arun.pageindex.service.PageIndexService;
+import im.arun.pageindex.util.ExecutorProvider;
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
@@ -133,7 +134,11 @@ public class PageIndexCLI implements Callable<Integer> {
     }
 
     public static void main(String[] args) {
-        int exitCode = new CommandLine(new PageIndexCLI()).execute(args);
-        System.exit(exitCode);
+        try {
+            int exitCode = new CommandLine(new PageIndexCLI()).execute(args);
+            System.exit(exitCode);
+        } finally {
+            ExecutorProvider.shutdown();
+        }
     }
 }

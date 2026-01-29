@@ -7,10 +7,13 @@ import im.arun.pageindex.util.JsonLogger;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import im.arun.pageindex.util.ExecutorProvider;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
 import java.util.stream.Collectors;
 
 /**
@@ -63,10 +66,11 @@ public class SummaryGenerator {
         
         jsonLogger.info("Found nodes to summarize", Map.of("count", nodes.size()));
         
-        // Generate summaries concurrently
+        // Generate summaries concurrently using shared executor
+        ExecutorService executor = ExecutorProvider.getExecutor();
         List<CompletableFuture<String>> futures = nodes.stream()
-            .map(node -> CompletableFuture.supplyAsync(() -> 
-                generateNodeSummary(node, model)))
+            .map(node -> CompletableFuture.supplyAsync(() ->
+                generateNodeSummary(node, model), executor))
             .collect(Collectors.toList());
         
         // Wait for all to complete

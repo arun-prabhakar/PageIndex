@@ -1,8 +1,0 @@
-model: "gpt-4o-2024-11-20"
-tocCheckPageNum: 20
-maxPageNumEachNode: 10
-maxTokenNumEachNode: 20000
-addNodeId: true
-addNodeSummary: true
-addDocDescription: false
-addNodeText: false

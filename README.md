@@ -135,57 +135,236 @@ You can generate the PageIndex tree structure with this open-source repo, or use
 
 ---
 
-# ⚙️ Package Usage
+# ⚙️ Java Library Usage
 
-You can follow these steps to generate a PageIndex tree from a PDF document.
+PageIndex is available as a **Java library** for seamless integration into Java applications.
 
-### 1. Install dependencies
+> **Note:** The original Python implementation has been moved to the `/legacy` folder for reference.
+
+### Installation
+
+Add PageIndex to your project using Maven:
+
+```xml
+<dependency>
+    <groupId>im.arun</groupId>
+    <artifactId>pageindex</artifactId>
+    <version>1.0</version>
+</dependency>
+```
+
+Or build from source:
 
 ```bash
-pip3 install --upgrade -r requirements.txt
+cd PageIndex
+mvn clean install
 ```
 
-### 2. Set your OpenAI API key
+### Quick Start
 
-Create a `.env` file in the root directory and add your API key:
+```java
+import im.arun.pageindex.service.PageIndexService;
+import im.arun.pageindex.config.PageIndexConfig;
+import im.arun.pageindex.model.TreeStructure;
 
-```bash
-CHATGPT_API_KEY=your_openai_key_here
+// Initialize with configuration
+PageIndexConfig config = new PageIndexConfig();
+config.setOpenaiApiKey("your-openai-api-key");
+config.setModel("gpt-4");
+
+PageIndexService service = new PageIndexService(config);
+
+// Process PDF document
+TreeStructure result = service.processDocument("/path/to/document.pdf");
+
+// Access results
+System.out.println("Document: " + result.getDocumentName());
+System.out.println("Description: " + result.getDescription());
+
+// Navigate tree structure
+result.getNodes().forEach(node -> {
+    System.out.println(node.getTitle() + " (pages " + 
+                      node.getStartIndex() + "-" + node.getEndIndex() + ")");
+    System.out.println("Summary: " + node.getSummary());
+});
+
+// Save to JSON file
+result.saveToFile("output.json");
 ```
 
-### 3. Run PageIndex on your PDF
+### Configuration Options
 
-```bash
-python3 run_pageindex.py --pdf_path /path/to/your/document.pdf
+#### Programmatic Configuration
+
+```java
+PageIndexConfig config = new PageIndexConfig();
+
+// Required
+config.setOpenaiApiKey(System.getenv("OPENAI_API_KEY"));
+
+// Optional - LLM settings
+config.setModel("gpt-4-turbo");
+config.setTemperature(0.0);
+config.setMaxTokens(4096);
+
+// Optional - Processing parameters
+config.setMaxPagesPerNode(50);
+config.setMaxTokensPerNode(30000);
+config.setVerificationSampleSize(5);
+config.setMaxRetries(10);
+
+PageIndexService service = new PageIndexService(config);
 ```
 
-<details>
-<summary><strong>Optional parameters</strong></summary>
-<br>
-You can customize the processing with additional optional arguments:
+#### Load from YAML
 
-```
---model                 OpenAI model to use (default: gpt-4o-2024-11-20)
---toc-check-pages       Pages to check for table of contents (default: 20)
---max-pages-per-node    Max pages per node (default: 10)
---max-tokens-per-node   Max tokens per node (default: 20000)
---if-add-node-id        Add node ID (yes/no, default: yes)
---if-add-node-summary   Add node summary (yes/no, default: yes)
---if-add-doc-description Add doc description (yes/no, default: yes)
-```
-</details>
+Create `config.yaml`:
 
-<details>
-<summary><strong>Markdown support</strong></summary>
-<br>
-We also provide markdown support for PageIndex. You can use the `-md_path` flag to generate a tree structure for a markdown file.
-
-```bash
-python3 run_pageindex.py --md_path /path/to/your/document.md
+```yaml
+openai_api_key: ${OPENAI_API_KEY}
+model: gpt-4
+temperature: 0.0
+max_tokens: 4096
+max_pages_per_node: 50
+max_tokens_per_node: 30000
+verification_sample_size: 5
+max_retries: 10
 ```
 
-> Note: in this function, we use "#" to determine node heading and their levels. For example, "##" is level 2, "###" is level 3, etc. Make sure your markdown file is formatted correctly. If your Markdown file was converted from a PDF or HTML, we don't recommend using this function, since most existing conversion tools cannot preserve the original hierarchy. Instead, use our [PageIndex OCR](https://pageindex.ai/blog/ocr), which is designed to preserve the original hierarchy, to convert the PDF to a markdown file and then use this function.
-</details>
+Load in code:
+
+```java
+import im.arun.pageindex.config.ConfigLoader;
+
+PageIndexConfig config = ConfigLoader.loadConfig("config.yaml");
+PageIndexService service = new PageIndexService(config);
+```
+
+### Advanced Usage
+
+#### Check Table of Contents
+
+```java
+Map<String, Object> tocInfo = service.checkToc("/path/to/document.pdf");
+
+boolean hasToc = (Boolean) tocInfo.get("has_toc");
+List<Integer> tocPages = (List<Integer>) tocInfo.get("toc_page_numbers");
+List<TocItem> tocItems = (List<TocItem>) tocInfo.get("toc_items");
+```
+
+#### Spring Boot Integration
+
+```java
+@Configuration
+public class PageIndexConfiguration {
+    
+    @Bean
+    public PageIndexConfig pageIndexConfig(
+            @Value("${openai.api.key}") String apiKey) {
+        PageIndexConfig config = new PageIndexConfig();
+        config.setOpenaiApiKey(apiKey);
+        config.setModel("gpt-4");
+        return config;
+    }
+    
+    @Bean
+    public PageIndexService pageIndexService(PageIndexConfig config) {
+        return new PageIndexService(config);
+    }
+}
+
+@RestController
+@RequestMapping("/api/documents")
+public class DocumentController {
+    
+    @Autowired
+    private PageIndexService pageIndexService;
+    
+    @PostMapping("/index")
+    public TreeStructure indexDocument(@RequestParam("file") MultipartFile file) 
+            throws IOException {
+        Path tempFile = Files.createTempFile("upload-", ".pdf");
+        file.transferTo(tempFile.toFile());
+        
+        TreeStructure result = pageIndexService.processDocument(
+            tempFile.toString()
+        );
+        
+        Files.delete(tempFile);
+        return result;
+    }
+}
+```
+
+#### Async Processing
+
+```java
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
+ExecutorService executor = Executors.newFixedThreadPool(4);
+
+List<String> pdfPaths = List.of("doc1.pdf", "doc2.pdf", "doc3.pdf");
+
+List<CompletableFuture<TreeStructure>> futures = pdfPaths.stream()
+    .map(path -> CompletableFuture.supplyAsync(
+        () -> service.processDocument(path), executor
+    ))
+    .toList();
+
+CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+
+List<TreeStructure> results = futures.stream()
+    .map(CompletableFuture::join)
+    .toList();
+```
+
+### API Reference
+
+#### PageIndexService
+
+**Main Methods:**
+
+- `TreeStructure processDocument(String pdfPath)` - Complete end-to-end processing
+- `Map<String, Object> checkToc(String pdfPath)` - Detect and extract table of contents
+
+#### TreeStructure
+
+**Properties:**
+- `String documentName` - PDF filename
+- `String description` - One-sentence document description
+- `List<TreeNode> nodes` - Root-level nodes
+- `Map<String, Object> metadata` - Additional metadata
+
+**Methods:**
+- `String toJson()` - Convert to JSON string
+- `void saveToFile(String path)` - Save to file
+
+#### TreeNode
+
+**Properties:**
+- `String title` - Section title
+- `String summary` - LLM-generated summary
+- `Integer level` - Hierarchy level (0 = root)
+- `Integer startIndex` - Starting page number
+- `Integer endIndex` - Ending page number
+- `List<TreeNode> children` - Child nodes
+- `String text` - Full text content (optional)
+
+### Requirements
+
+- **Java 17+**
+- **OpenAI API key** (GPT-4 recommended)
+- **Maven 3.6+** (for building)
+
+### Dependencies
+
+- Apache PDFBox 3.0.1 - PDF text extraction
+- Jackson 2.16 - JSON serialization
+- OkHttp 4.12 - HTTP client for OpenAI API
+- JTokkit 0.3.7 - Tiktoken tokenization
+- Lombok 1.18.30 - Reduce boilerplate
 
 <!-- 
 # ☁️ Improved Tree Generation with PageIndex OCR

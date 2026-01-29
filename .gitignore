@@ -14,6 +14,7 @@ logs/
 parts/*
 json_results/*
 # Compiled class file
+target/
 *.class
 
 # Log file
